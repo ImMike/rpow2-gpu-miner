@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+env/
+*.log
+*.csv
+*.json
+!package.json
+.taichi/
+.vscode/
+.idea/
+.DS_Store
