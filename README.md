@@ -47,15 +47,17 @@ Numbers are wall-clock against the live `api.rpow2.com` endpoint, so they includ
 
 ## Hardware support
 
-| GPU vendor | Linux | Windows | macOS |
-| --- | --- | --- | --- |
-| AMD (RDNA, RDNA2, RDNA3) | ✓ via Mesa `radv` | ✓ via AMD driver | n/a |
-| NVIDIA (Maxwell+) | ✓ proprietary or open driver | ✓ | n/a |
-| Intel (Gen9+ / Arc) | ✓ via `anv` (Mesa) | ✓ | n/a |
-| Apple Silicon | n/a | n/a | ✓ via MoltenVK |
-| Integrated graphics (Vega, Iris, Radeon 700M/800M, etc.) | ✓ | ✓ | ✓ |
+| GPU vendor | Linux | Windows | WSL2 | macOS |
+| --- | --- | --- | --- | --- |
+| AMD (RDNA, RDNA2, RDNA3) | ✓ via Mesa `radv` | ✓ via AMD driver | ✓ via WSLg | n/a |
+| NVIDIA (Maxwell+) | ✓ proprietary or open driver | ✓ | ✓ via WSLg | n/a |
+| Intel (Gen9+ / Arc) | ✓ via `anv` (Mesa) | ✓ | ✓ via WSLg | n/a |
+| Apple Silicon | n/a | n/a | n/a | ✓ via MoltenVK |
+| Integrated graphics (Vega, Iris, Radeon 700M/800M, etc.) | ✓ | ✓ | ✓ | ✓ |
 
 If `vulkaninfo` lists your GPU, this miner will run on it.
+
+**WSL1 is not supported** — there's no GPU passthrough on WSL1. See the [WSL2 setup section](#running-on-wsl2-windows) below if you're on Windows.
 
 ---
 
@@ -82,6 +84,51 @@ sudo apt install libvulkan1 mesa-vulkan-drivers     # AMD/Intel
 ```
 
 Verify with `ls /usr/share/vulkan/icd.d/` — you should see at least one `*_icd.*.json`.
+
+### Running on WSL2 (Windows)
+
+This miner runs on Windows via WSL2 with full GPU acceleration. The trick is that the GPU driver lives on the **Windows side**, not inside the Linux distro — WSL2 forwards Vulkan calls to the host driver through `/dev/dxg`.
+
+**One-time setup:**
+
+1. Confirm you're on **WSL2**, not WSL1. From PowerShell:
+   ```powershell
+   wsl -l -v
+   ```
+   The `VERSION` column must say `2`. If it says `1`, convert with `wsl --set-version <distro> 2`.
+2. Update WSL itself (PowerShell as admin):
+   ```powershell
+   wsl --update
+   ```
+3. Install the **WSL-aware GPU driver on Windows** (not inside WSL):
+   - **NVIDIA:** any Game Ready or Studio driver from version 470 onward ships with WSL2 GPU support out of the box.
+   - **AMD:** Adrenalin 22.20.x or newer.
+   - **Intel Arc / Iris Xe:** driver `30.0.101.1660` or newer.
+4. Inside your WSL2 distro (Ubuntu/Debian shown):
+   ```bash
+   sudo apt update
+   sudo apt install -y libvulkan1 mesa-vulkan-drivers vulkan-tools
+   ```
+   > Do **not** install a Linux-side GPU driver such as `amdgpu-pro`, `nvidia-driver-*`, or `intel-opencl-icd` inside WSL — those conflict with the WSLg path.
+5. Verify the host GPU is visible from inside WSL:
+   ```bash
+   vulkaninfo --summary
+   ```
+   You should see your real card listed (NVIDIA RTX..., AMD Radeon..., Intel Arc...). If you only see `llvmpipe` (CPU software fallback), the host driver bridge isn't active — see troubleshooting below.
+6. From there, install and run the miner exactly like native Linux:
+   ```bash
+   pip install -r requirements.txt
+   export RPOW_COOKIE='rpow_session=...'
+   python rpow2_gpu_miner.py
+   ```
+
+**Expected performance:** typically 5–15 % slower than the same GPU on bare-metal Linux (the cost of the WSL2/D3D12 translation layer). Still ~1000× faster than the in-browser miner.
+
+**WSL2 troubleshooting:**
+
+- `vulkaninfo --summary` only shows `llvmpipe` → the WSLg GPU bridge isn't active. Run `wsl --shutdown` from PowerShell, reopen the distro, and re-check. If still broken, the most common cause is a stale or missing host driver (re-do step 3).
+- `ls /usr/lib/wsl/lib/` is empty → `wsl --update` didn't take. Re-run it as admin.
+- Performance feels suspiciously low (`<100 MH/s` on a discrete GPU) → you're probably running on `llvmpipe`. Same fix as above.
 
 ---
 
@@ -202,6 +249,9 @@ No. Vulkan ICDs are usually pre-installed on every desktop OS. You only need ele
 
 **Q: Will this work on a laptop with only integrated graphics?**
 Yes. Modern integrated GPUs (Intel Iris Xe, AMD Radeon 780M / 880M, Apple M-series) typically deliver 200–500 MH/s on this kernel — comfortably faster than even a fast CPU on the in-browser miner.
+
+**Q: Does it work on Windows / WSL?**
+Yes on **WSL2** with WSLg (Windows 10 21H2+ or Windows 11) — full GPU acceleration via the host driver, see [Running on WSL2 (Windows)](#running-on-wsl2-windows). **No on WSL1**: WSL1 has no GPU passthrough at all. Native Windows (without WSL) also works if you install Python and a Vulkan-capable GPU driver.
 
 **Q: It says "WebAssembly is not supported in this environment". Help?**
 That's the in-browser miner's error, not this one. This Python miner doesn't use WebAssembly.
